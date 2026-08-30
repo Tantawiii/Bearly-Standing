@@ -25,6 +25,9 @@ namespace BearlyStanding
         [SerializeField] private Vector3 carriedLocalEuler = new Vector3(0f, 0f, 90f);       // "slung over the shoulder"
         [SerializeField] private float groundedSettleDelay = 0.4f;
 
+        [Tooltip("The physics CapsuleCollider used only while Downed/carried/thrown. Optional — auto-found in Awake (first non-CharacterController collider) if left empty.")]
+        [SerializeField] private CapsuleCollider physicsCollider;
+
         private PlayerHealth health;
         private PlayerController controller;
         private Rigidbody rb;
@@ -42,7 +45,20 @@ namespace BearlyStanding
             health = GetComponent<PlayerHealth>();
             controller = GetComponent<PlayerController>();
             rb = GetComponent<Rigidbody>();
-            col = GetComponent<Collider>();
+
+            // CharacterController also derives from Collider, so a plain GetComponent<Collider>() can
+            // return it by mistake — pick the explicit reference, or the first non-CharacterController collider.
+            col = physicsCollider;
+            if (col == null)
+            {
+                foreach (var c in GetComponents<Collider>())
+                {
+                    if (c is CharacterController) continue;
+                    col = c;
+                    break;
+                }
+            }
+
             health.OnEnteredDowned += HandleEnteredDowned;
         }
 
@@ -56,7 +72,7 @@ namespace BearlyStanding
             controller.SetCharacterControllerEnabled(false);
             rb.isKinematic = false;
             rb.useGravity = true;
-            col.enabled = true;
+            if (col != null) col.enabled = true;
             transform.localEulerAngles = downedLocalEuler;
         }
 
@@ -67,7 +83,7 @@ namespace BearlyStanding
             isHeld = true;
             holder = newHolder;
             rb.isKinematic = true;
-            col.enabled = false;
+            if (col != null) col.enabled = false;
 
             transform.SetParent(holdSocket, false);
             transform.localPosition = carriedLocalPosition;
@@ -100,7 +116,7 @@ namespace BearlyStanding
             if (holder != null) holder.ClearHeld(this);
             holder = null;
             transform.SetParent(null, true);
-            col.enabled = true;
+            if (col != null) col.enabled = true;
             if (settle) transform.localEulerAngles = downedLocalEuler;
         }
 

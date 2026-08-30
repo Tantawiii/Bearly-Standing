@@ -22,7 +22,7 @@ namespace BearlyStanding
         private PlayerController playerController;
         private PlayerCombat playerCombat;
 
-        private InputAction moveAction, lookAction, attackAction, throwAction, interactAction, dodgeAction, pauseAction;
+        private InputAction moveAction, lookAction, attackAction, throwAction, interactAction, dodgeAction, sprintAction, pauseAction;
 
         private void Awake()
         {
@@ -35,30 +35,42 @@ namespace BearlyStanding
             attackAction = map.FindAction("Attack", true);
             throwAction = map.FindAction("Throw", true);
             interactAction = map.FindAction("Interact", true);
-            dodgeAction = map.FindAction("Dodge", true);
+            dodgeAction = map.FindAction("Dodge", true);      // Space — repurposed as Jump
+            sprintAction = map.FindAction("Sprint", true);    // Left Shift — hold to run
             pauseAction = map.FindAction("Pause", true);
         }
 
         private void OnEnable()
         {
             moveAction.Enable(); lookAction.Enable(); attackAction.Enable();
-            throwAction.Enable(); interactAction.Enable(); dodgeAction.Enable(); pauseAction.Enable();
+            throwAction.Enable(); interactAction.Enable(); dodgeAction.Enable();
+            sprintAction.Enable(); pauseAction.Enable();
 
-            attackAction.performed += OnAttack;
-            throwAction.performed += OnThrow;
+            // Controls: LMB (Attack) throws straight away; RMB (Throw) is now hold-to-aim —
+            // the trajectory arc shows while held and the pillow leaves on release.
+            // Player melee is retired (bots still swing via TeddyAI → PlayerCombat.TryMeleeAttack).
+            attackAction.performed += OnThrow;
+            throwAction.performed += OnAimStart;
+            throwAction.canceled += OnAimRelease;
             interactAction.performed += OnInteract;
+            dodgeAction.performed += OnJump;
             pauseAction.performed += OnPause;
         }
 
         private void OnDisable()
         {
-            attackAction.performed -= OnAttack;
-            throwAction.performed -= OnThrow;
+            attackAction.performed -= OnThrow;
+            throwAction.performed -= OnAimStart;
+            throwAction.canceled -= OnAimRelease;
             interactAction.performed -= OnInteract;
+            dodgeAction.performed -= OnJump;
             pauseAction.performed -= OnPause;
 
+            if (playerCombat != null) playerCombat.Aiming = false;
+
             moveAction.Disable(); lookAction.Disable(); attackAction.Disable();
-            throwAction.Disable(); interactAction.Disable(); dodgeAction.Disable(); pauseAction.Disable();
+            throwAction.Disable(); interactAction.Disable(); dodgeAction.Disable();
+            sprintAction.Disable(); pauseAction.Disable();
         }
 
         private void Update()
@@ -71,13 +83,30 @@ namespace BearlyStanding
 
             playerController.MoveInput = new Vector2(worldMove.x, worldMove.z);
             playerController.FacingOverride = worldMove.sqrMagnitude > 0.01f ? worldMove : (Vector3?)null;
+            playerController.Sprinting = CanAct && sprintAction.IsPressed();
+
+            // Drop the aim if the bear can no longer act (downed / eliminated) while holding RMB.
+            if (!CanAct && playerCombat.Aiming) playerCombat.Aiming = false;
         }
 
         public Vector2 LookDelta => lookAction.ReadValue<Vector2>();
 
-        private void OnAttack(InputAction.CallbackContext ctx) => playerCombat.TryMeleeAttack();
-        private void OnThrow(InputAction.CallbackContext ctx) => playerCombat.TryThrow();
-        private void OnInteract(InputAction.CallbackContext ctx) => playerCombat.TryInteract();
+        /// <summary>False once the bear is Downed or Eliminated — swallow combat input from then on.</summary>
+        private bool CanAct => playerController.MovementEnabled;
+
+        private void OnThrow(InputAction.CallbackContext ctx) { if (CanAct) playerCombat.TryThrow(); }
+
+        private void OnAimStart(InputAction.CallbackContext ctx) { if (CanAct) playerCombat.Aiming = true; }
+
+        private void OnAimRelease(InputAction.CallbackContext ctx)
+        {
+            if (!playerCombat.Aiming) return;
+            playerCombat.Aiming = false;
+            if (CanAct) playerCombat.TryThrow();
+        }
+
+        private void OnInteract(InputAction.CallbackContext ctx) { if (CanAct) playerCombat.TryInteract(); }
+        private void OnJump(InputAction.CallbackContext ctx) { if (CanAct) playerController.TryJump(); }
         private void OnPause(InputAction.CallbackContext ctx) => OnPauseRequested?.Invoke();
     }
 }

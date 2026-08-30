@@ -6,6 +6,8 @@ namespace BearlyStanding
 {
     public enum MatchState { Lobby, Countdown, Playing, GameOver }
 
+    // Tracks alive players / pillows and drives the last-bear-standing win condition.
+
     /// <summary>
     /// Tracks alive players and drives the win condition. Local-authority version for Day 1 —
     /// Day 2 makes this server-authoritative over Mirror. Only Eliminated removes a bear from
@@ -46,6 +48,14 @@ namespace BearlyStanding
             State = MatchState.Countdown;
             OnCountdownStarted?.Invoke();
             Invoke(nameof(BeginFight), countdownDuration);
+        }
+
+        /// <summary>Offline rematch = reload the arena scene (GameManager re-spawns everyone fresh).
+        /// Networked rematch isn't supported yet — players return to the menu and re-host.</summary>
+        public void RequestRematch()
+        {
+            if (Mirror.NetworkServer.active || Mirror.NetworkClient.active) return;
+            UnityEngine.SceneManagement.SceneManager.LoadScene(gameObject.scene.name);
         }
 
         private void BeginFight()

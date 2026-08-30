@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a37495cf1e5074479b1733d7a31cdb8, type: 3}
+  m_Name: MusicBank
+  m_EditorClassIdentifier: Assembly-CSharp::BearlyStanding.MusicBank
+  menuMusic: {fileID: 8300000, guid: 70160c9df254c764f8c170af42fe3aba, type: 3}
+  gameMusic: {fileID: 8300000, guid: ccd7cfb19b2222643929f29bcb04c8b4, type: 3}
+  menuVolume: 0.5
+  gameVolume: 0.45
+  menuScenes:
+  - MainMenu

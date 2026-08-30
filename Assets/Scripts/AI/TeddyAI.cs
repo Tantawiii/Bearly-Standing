@@ -3,10 +3,10 @@ using UnityEngine;
 namespace BearlyStanding
 {
     /// <summary>
-    /// Simple state-machine AI per GDD section 22-25: Idle -&gt; Search for Pillow -&gt; Pick Up
-    /// -&gt; Search for Target -&gt; Chase -&gt; Attack/Throw -&gt; Recover -&gt; repeat, with a little
-    /// randomness (retarget chance, missed throws) so bots don't all feel identical.
-    /// Drives the same PlayerController/PlayerCombat/PlayerHealth every human bear uses.
+    /// Simple state-machine AI: Idle → Search for Pillow → Pick Up → Search for Target → Chase →
+    /// Attack/Throw → Recover → repeat, with a little randomness (retarget chance, missed throws) so
+    /// bots don't all feel identical, plus a boids-style separation nudge so they stop clumping into
+    /// each other. Drives the same PlayerController/PlayerCombat/PlayerHealth the human bear uses.
     /// </summary>
     [RequireComponent(typeof(PlayerController))]
     [RequireComponent(typeof(PlayerCombat))]
@@ -20,8 +20,12 @@ namespace BearlyStanding
         [SerializeField] private float recoverTime = 0.6f;
         [SerializeField] private float reactionDelayMin = 0.05f;
         [SerializeField] private float reactionDelayMax = 0.35f;
-        [Range(0f, 1f)] [SerializeField] private float retargetRandomness = 0.1f; // "10% off-target choice"
-        [Range(0f, 1f)] [SerializeField] private float missedThrowChance = 0.15f;
+        [Range(0f, 1f)] [SerializeField] private float retargetRandomness = 0.1f;   // "10% off-target choice"
+        [Range(0f, 1f)] [SerializeField] private float missedThrowChance = 0.4f;    // 40% of throws are skipped/whiffed
+
+        [Header("Separation (anti-clump)")]
+        [SerializeField] private float separationRadius = 2.6f;
+        [SerializeField] private float separationWeight = 1.3f;
 
         private PlayerController controller;
         private PlayerCombat combat;
@@ -30,6 +34,7 @@ namespace BearlyStanding
         [SerializeField] private AIState state = AIState.Idle; // visible in Inspector for debugging
         private Pillow targetPillow;
         private PlayerHealth targetPlayer;
+        private Vector3 desiredDir;   // world-space move intent this frame, before separation
         private float stateTimer;
         private float nextDecisionTime;
 
@@ -45,30 +50,46 @@ namespace BearlyStanding
             if (health.State != HealthState.Alive)
             {
                 controller.MoveInput = Vector2.zero;
+                controller.Sprinting = false;
                 return;
             }
 
-            if (Time.time < nextDecisionTime) return;
+            controller.Sprinting = state == AIState.ChaseTarget && targetPlayer != null &&
+                                   Vector3.Distance(transform.position, targetPlayer.transform.position) > meleeRange * 2f;
 
-            switch (state)
+            if (Time.time >= nextDecisionTime)
             {
-                case AIState.Idle:
-                case AIState.SearchForPillow:
-                    TickSearchForPillow();
-                    break;
-                case AIState.MoveToPillow:
-                    TickMoveToPillow();
-                    break;
-                case AIState.SearchForTarget:
-                    TickSearchForTarget();
-                    break;
-                case AIState.ChaseTarget:
-                    TickChaseTarget();
-                    break;
-                case AIState.Recover:
-                    TickRecover();
-                    break;
+                switch (state)
+                {
+                    case AIState.Idle:
+                    case AIState.SearchForPillow: TickSearchForPillow(); break;
+                    case AIState.MoveToPillow: TickMoveToPillow(); break;
+                    case AIState.SearchForTarget: TickSearchForTarget(); break;
+                    case AIState.ChaseTarget: TickChaseTarget(); break;
+                    case AIState.Recover: TickRecover(); break;
+                }
             }
+
+            // Blend the state's move intent with a push away from other bears (never from the target).
+            Vector3 move = desiredDir + Separation();
+            move = Vector3.ClampMagnitude(move, 1f);
+            controller.MoveInput = move.sqrMagnitude > 0.0004f ? new Vector2(move.x, move.z) : Vector2.zero;
+        }
+
+        private Vector3 Separation()
+        {
+            if (MatchManager.Instance == null) return Vector3.zero;
+            Vector3 push = Vector3.zero;
+            foreach (var p in MatchManager.Instance.ActivePlayers)
+            {
+                if (p == null || p == health || p == targetPlayer || p.State == HealthState.Eliminated) continue;
+                Vector3 away = transform.position - p.transform.position;
+                away.y = 0f;
+                float d = away.magnitude;
+                if (d > 0.01f && d < separationRadius)
+                    push += away / d * ((separationRadius - d) / separationRadius);
+            }
+            return push * separationWeight;
         }
 
         private void TickSearchForPillow()
@@ -76,8 +97,6 @@ namespace BearlyStanding
             if (combat.IsHolding) { state = AIState.SearchForTarget; return; }
 
             var nearbyTarget = AITargeting.FindNearestAliveTarget(transform.position, health);
-
-            // GDD: "if a target is very close without a pillow, attack anyway"
             if (nearbyTarget != null && Vector3.Distance(nearbyTarget.transform.position, transform.position) < meleeRange * 1.2f)
             {
                 targetPlayer = nearbyTarget;
@@ -99,7 +118,6 @@ namespace BearlyStanding
             }
 
             MoveToward(targetPillow.transform.position);
-
             if (Vector3.Distance(transform.position, targetPillow.transform.position) <= pickupRange)
             {
                 combat.TryInteract();
@@ -113,7 +131,6 @@ namespace BearlyStanding
 
             targetPlayer = AITargeting.FindNearestAliveTarget(transform.position, health);
             if (targetPlayer == null) { Wander(); return; }
-
             state = AIState.ChaseTarget;
         }
 
@@ -121,7 +138,6 @@ namespace BearlyStanding
         {
             if (targetPlayer == null || targetPlayer.State == HealthState.Eliminated)
             {
-                // small personality randomness: sometimes drift to whichever target is nearest right now anyway
                 if (Random.value < retargetRandomness) targetPlayer = AITargeting.FindNearestAliveTarget(transform.position, health);
                 state = AIState.SearchForTarget;
                 return;
@@ -132,23 +148,23 @@ namespace BearlyStanding
 
             if (!combat.IsHolding)
             {
-                if (dist < meleeRange) combat.TryInteract(); // no pillow, no time to be picky
+                if (dist < meleeRange) combat.TryInteract();
                 MoveToward(targetPlayer.transform.position);
                 return;
             }
 
             if (dist <= meleeRange)
             {
-                controller.MoveInput = Vector2.zero;
+                desiredDir = Vector3.zero;
                 state = AIState.Attack;
                 combat.TryMeleeAttack();
                 Decide(AIState.Recover, 0f, 0f);
             }
             else if (dist <= throwRange)
             {
-                controller.MoveInput = Vector2.zero;
+                desiredDir = Vector3.zero;
                 state = AIState.ThrowAtTarget;
-                if (Random.value >= missedThrowChance) combat.TryThrow(); // "occasional missed throws" — simply skip the throw
+                if (Random.value >= missedThrowChance) combat.TryThrow();
                 Decide(AIState.Recover, 0f, 0f);
             }
             else
@@ -159,7 +175,7 @@ namespace BearlyStanding
 
         private void TickRecover()
         {
-            controller.MoveInput = Vector2.zero;
+            desiredDir = Vector3.zero;
             stateTimer += Time.deltaTime;
             if (stateTimer >= recoverTime)
             {
@@ -172,12 +188,12 @@ namespace BearlyStanding
         {
             Vector3 dir = worldPos - transform.position;
             dir.y = 0f;
-            controller.MoveInput = dir.sqrMagnitude > 0.01f ? new Vector2(dir.normalized.x, dir.normalized.z) : Vector2.zero;
+            desiredDir = dir.sqrMagnitude > 0.01f ? dir.normalized : Vector3.zero;
         }
 
         private void Wander()
         {
-            controller.MoveInput = Vector2.zero; // minimal idle — just wait for the next decision tick
+            desiredDir = Vector3.zero;
             Decide(AIState.SearchForPillow, 0.5f, 1.2f);
         }
 

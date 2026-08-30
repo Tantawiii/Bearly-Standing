@@ -44,6 +44,13 @@ namespace BearlyStanding
             if (!hitThisSwing.Add(health)) return;
 
             Vector3 dir = health.transform.position - (wielder != null ? wielder.transform.position : transform.position);
+
+            // Networked: route the hit through the attacker's NetworkBear so it's applied
+            // server-authoritatively and replayed on every client. Offline: apply directly.
+            var attacker = wielder != null ? wielder.GetComponent<NetworkBear>() : null;
+            if (attacker != null && attacker.TryRelayHit(health, dir, impact.KnockbackForce, impact.VerticalForce))
+                return;
+
             health.ApplyHit(dir, impact.KnockbackForce, impact.VerticalForce);
         }
     }
